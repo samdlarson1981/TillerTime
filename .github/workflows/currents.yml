@@ -1,0 +1,44 @@
+# Rebuilds the SalishSeaCast current pack four times a day and publishes it as a
+# GitHub release asset with a fixed address the app can download:
+#   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttcur
+# Paste that address into Tiller Time › More › Currents › Pack address.
+# Free on GitHub Actions; the repository must be public for the app to download without a login.
+name: Build current pack
+
+on:
+  schedule:
+    - cron: "17 2,8,14,20 * * *"   # UTC, four times a day
+  workflow_dispatch: {}             # "Run workflow" button for a manual build
+  push:                             # rebuild when the builder changes
+    branches: [main]
+    paths: ["tools/currents/**", ".github/workflows/currents.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install numpy scipy
+      - name: Cache model grid
+        uses: actions/cache@v4
+        with:
+          path: tools/currents/.cache
+          key: ssc-grid-v21-08
+      - name: Build pack
+        run: python tools/currents/build_current_pack.py -o salishsea.ttcur
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view currents-latest >/dev/null 2>&1 || \
+            gh release create currents-latest --title "Current pack (latest)" \
+              --notes "SalishSeaCast near-surface currents for Tiller Time. Rebuilt automatically. Model results © SalishSeaCast Project Contributors and UBC, Apache-2.0."
+          gh release upload currents-latest salishsea.ttcur --clobber

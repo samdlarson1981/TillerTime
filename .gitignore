@@ -1,0 +1,6 @@
+tools/currents/.cache/
+*.ttcur
+.DS_Store
+xcuserdata/
+DerivedData/
+__pycache__/
