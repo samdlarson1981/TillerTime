@@ -20,3 +20,11 @@ See [tools/currents/README.md](tools/currents/README.md) for how the pack is bui
 **Credits:** Tide predictions: NOAA CO-OPS and the Canadian Hydrographic Service. Wind and rain contain information licensed under the Open Government Licence – Canada (Environment and Climate Change Canada, HRDPS). SalishSeaCast NEMO model results are © the SalishSeaCast Project Contributors and The University of British Columbia, licensed under Apache 2.0. Cite Soontiens et al. (2016) and Soontiens and Allen (2017).
 
 **Not for navigation on its own.** These are model forecasts. They underestimate the flow in passes narrower than the grid (Deception Pass, Active Pass, Dodd Narrows and others).
+
+## Vector charts
+
+`tools/enc/build_enc_pack.py` turns NOAA's free electronic navigational charts (S-57 ENCs,
+public domain) for the US Salish Sea into one compact pack, `charts_salish.ttenc`, that the
+app draws on the phone: depth areas, contours, soundings, land, docks, rocks, wrecks,
+buoys, beacons, lights and place names. `.github/workflows/charts.yml` rebuilds it every
+Monday. Canadian waters use the CHS chart service in the app. Not for navigation.
