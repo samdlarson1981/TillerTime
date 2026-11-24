@@ -1,9 +1,10 @@
-# Rebuilds the SalishSeaCast current pack four times a day and publishes it as a
-# GitHub release asset with a fixed address the app can download:
-#   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttcur
+# Rebuilds the forecast packs four times a day and publishes them as GitHub release
+# assets with fixed addresses the app downloads:
+#   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttcur   (currents, UBC SalishSeaCast)
+#   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttwind  (wind, ECCC HRDPS)
 # Paste that address into Tiller Time › More › Currents › Pack address.
 # Free on GitHub Actions; the repository must be public for the app to download without a login.
-name: Build current pack
+name: Build forecast packs
 
 on:
   schedule:
@@ -11,7 +12,7 @@ on:
   workflow_dispatch: {}             # "Run workflow" button for a manual build
   push:                             # rebuild when the builder changes
     branches: [main]
-    paths: ["tools/currents/**", ".github/workflows/currents.yml"]
+    paths: ["tools/**", ".github/workflows/currents.yml"]
 
 permissions:
   contents: write
@@ -32,13 +33,15 @@ jobs:
         with:
           path: tools/currents/.cache
           key: ssc-grid-v21-08
-      - name: Build pack
+      - name: Build current pack
         run: python tools/currents/build_current_pack.py -o salishsea.ttcur
+      - name: Build wind pack
+        run: python tools/wind/build_wind_pack.py -o salishsea.ttwind
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" \
-              --notes "SalishSeaCast near-surface currents for Tiller Time. Rebuilt automatically. Model results © SalishSeaCast Project Contributors and UBC, Apache-2.0."
-          gh release upload currents-latest salishsea.ttcur --clobber
+              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS)."
+          gh release upload currents-latest salishsea.ttcur salishsea.ttwind --clobber
