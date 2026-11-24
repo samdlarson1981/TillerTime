@@ -1,0 +1,34 @@
+# Builds Tiller Time's free BC vector chart pack from open data and publishes it with the
+# other packs: .../releases/download/currents-latest/charts_bc.ttenc
+#   Depths: CHS NONNA-10 (Open Government Licence - Canada). Land, buoys, lights, docks and
+#   names: OpenStreetMap (ODbL). Not for navigation.
+name: Build BC vector charts
+
+on:
+  schedule:
+    - cron: "17 10 3 * *"           # monthly; the survey data changes slowly
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ["tools/enc/build_bc_pack.py", ".github/workflows/charts-bc.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GDAL
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gdal-bin python3-gdal python3-numpy
+      - name: Build BC chart pack
+        run: /usr/bin/python3 tools/enc/build_bc_pack.py --work bc_work --threads 4 --output charts_bc.ttenc 2>&1 | grep -v "Warning 1"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view currents-latest >/dev/null 2>&1 || \
+            gh release create currents-latest --title "Current pack (latest)" --notes "Packs for Tiller Time."
+          gh release upload currents-latest charts_bc.ttenc --clobber
