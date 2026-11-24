@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,13 +35,15 @@ jobs:
           key: ssc-grid-v21-08
       - name: Build current pack
         run: python tools/currents/build_current_pack.py -o salishsea.ttcur
-      - name: Build wind pack
-        run: python tools/wind/build_wind_pack.py -o salishsea.ttwind
+      - name: Build wind and rain packs
+        run: python tools/wind/build_wind_pack.py -o salishsea.ttwind --rain-output salishsea.ttrain
+      - name: Build tide pack
+        run: python tools/tides/build_tide_pack.py -o salishsea.tides.json
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" \
-              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS)."
-          gh release upload currents-latest salishsea.ttcur salishsea.ttwind --clobber
+              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
+          gh release upload currents-latest salishsea.ttcur salishsea.ttwind salishsea.ttrain salishsea.tides.json --clobber

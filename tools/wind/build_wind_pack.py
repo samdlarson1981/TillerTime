@@ -15,7 +15,10 @@ where u/v are the east/north components of the air motion (toward), n = nlat*nlo
 row 0 = southernmost latitude.
 
 Requires: Python 3.9+, numpy, scipy
-Usage:    python3 build_wind_pack.py -o salishsea.ttwind
+Usage:    python3 build_wind_pack.py -o salishsea.ttwind --rain-output salishsea.ttrain
+
+With --rain-output it also fetches HRDPS.CONTINENTAL_RT (precipitation rate) and writes
+    "HRAN" ... header JSON ... raw DEFLATE of, per hour: uint8 rate[n]   (× 0.1 = mm/h)
 """
 import argparse
 import datetime as dt
@@ -34,6 +37,7 @@ from scipy.io import netcdf_file
 
 GEOMET = "https://geo.weather.gc.ca/geomet"
 SPEED, DIR, GUST = "HRDPS.CONTINENTAL_WSPD", "HRDPS.CONTINENTAL_WD", "HRDPS-WEonG_2.5km_WindGust"
+RATE = "HRDPS.CONTINENTAL_RT"          # precipitation rate, mm/s (kg m-2 s-1)
 UA = "TillerTimeWindPack/0.1 (+chartplotter)"
 BOX = dict(south=46.8, north=51.2, west=-126.5, east=-121.2)   # same area as the current pack
 
@@ -88,7 +92,7 @@ def build(args):
     hours = int((last - start).total_seconds() // 3600) + 1
     print(f"HRDPS run {ref}: {hours} hours {start:%Y-%m-%d %H:%M} → {last:%Y-%m-%d %H:%M} UTC")
 
-    times, U, V, G = [], [], [], []
+    times, U, V, G, P = [], [], [], [], []
     lat = lon = None
     with tempfile.TemporaryDirectory() as work:
         for h in range(hours):
@@ -96,6 +100,7 @@ def build(args):
             la, lo, spd = field(SPEED, t, work)
             _, _, wd = field(DIR, t, work)
             _, _, gust = field(GUST, t, work)
+            _, _, rate = field(RATE, t, work) if args.rain_output else (None, None, None)
             if lat is None:
                 lat, lon = la, lo
             elif la.shape != lat.shape or lo.shape != lon.shape:
@@ -106,6 +111,8 @@ def build(args):
             V.append(-spd * np.cos(rad))
             G.append(np.where(np.isfinite(gust), np.maximum(gust, spd), spd))
             times.append(int(t.timestamp()))
+            if rate is not None:
+                P.append(np.nan_to_num(rate, nan=0) * 3600)          # → mm/h
             if h % 6 == 0:
                 print(f"  {t:%a %H:%M}Z  max {np.nanmax(spd) * 1.943844:.0f} kn")
 
@@ -137,9 +144,28 @@ def build(args):
         f.write(body)
     print(f"Wrote {args.output}: {os.path.getsize(args.output) / 1e6:.1f} MB, {len(times)} hours, grid {len(lat)}×{len(lon)}")
 
+    if args.rain_output:
+        # Rain pack: per hour uint8 rate in 0.1 mm/h steps (0–25.5 mm/h), same grid.
+        rraw = bytearray()
+        for p in P:
+            rraw += np.clip(np.round(p * 10), 0, 255).astype(np.uint8).tobytes()
+        comp = zlib.compressobj(9, zlib.DEFLATED, -15)
+        rbody = comp.compress(bytes(rraw)) + comp.flush()
+        rh = dict(header, format="ttrain", source="ECCC HRDPS 2.5 km via MSC GeoMet (" + RATE + ")",
+                  fields=["rate"], scale=0.1, units="mm/h", rawBytes=len(rraw))
+        hj = json.dumps(rh, separators=(",", ":")).encode()
+        with open(args.rain_output, "wb") as f:
+            f.write(b"HRAN")
+            f.write(struct.pack("<HHI", 1, 0, len(hj)))
+            f.write(hj)
+            f.write(rbody)
+        peak = max(float(p.max()) for p in P)
+        print(f"Wrote {args.rain_output}: {os.path.getsize(args.rain_output) / 1e6:.2f} MB, peak {peak:.1f} mm/h")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-o", "--output", default="salishsea.ttwind")
     ap.add_argument("--hours-back", type=int, default=3)
+    ap.add_argument("--rain-output", help="also write a precipitation-rate pack (.ttrain)")
     build(ap.parse_args())
