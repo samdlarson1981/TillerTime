@@ -145,6 +145,46 @@ def contour(ds_mem, levels, polygons):
     return src, lyr
 
 
+LAND_LAYER = None
+LAND_LOCK = None
+
+
+def load_land_layer(box, zip_path):
+    """OSM land in Web Mercator, in memory, for masking soundings that fall ashore."""
+    import threading
+    global LAND_LAYER, LAND_LOCK
+    shp = "/vsizip/" + zip_path + "/land-polygons-split-4326/land_polygons.shp"
+    src_ds = ogr.Open(shp)
+    lyr = src_ds.GetLayer(0)
+    lyr.SetSpatialFilterRect(*box)
+    s4326 = osr.SpatialReference(); s4326.ImportFromEPSG(4326)
+    s4326.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    s3857 = osr.SpatialReference(); s3857.ImportFromEPSG(3857)
+    tr = osr.CoordinateTransformation(s4326, s3857)
+    mem = ogr.GetDriverByName("Memory").CreateDataSource("land")
+    out = mem.CreateLayer("land", s3857, ogr.wkbMultiPolygon)
+    for f in lyr:
+        g = f.GetGeometryRef().Clone()
+        g.Transform(tr)
+        nf = ogr.Feature(out.GetLayerDefn()); nf.SetGeometry(g); out.CreateFeature(nf)
+    LAND_LAYER = (mem, out)
+    LAND_LOCK = threading.Lock()
+
+
+def land_mask(gt, shape):
+    if LAND_LAYER is None:
+        return np.zeros(shape, bool)
+    r = gdal.GetDriverByName("MEM").Create("", shape[1], shape[0], 1, gdal.GDT_Byte)
+    r.SetGeoTransform(gt)
+    srs = osr.SpatialReference(); srs.ImportFromEPSG(3857); r.SetProjection(srs.ExportToWkt())
+    with LAND_LOCK:
+        lyr = LAND_LAYER[1]
+        lyr.SetSpatialFilterRect(gt[0], gt[3] + shape[0] * gt[5], gt[0] + shape[1] * gt[1], gt[3])
+        gdal.RasterizeLayer(r, [1], lyr, burn_values=[1], options=["ALL_TOUCHED=TRUE"])
+        lyr.SetSpatialFilter(None)
+    return r.GetRasterBand(1).ReadAsArray().astype(bool)
+
+
 def process_chunk(args):
     x0, y1, work = args              # top-left corner in metres
     n = CHUNK + 1                    # one cell of overlap with the next chunk
@@ -210,7 +250,9 @@ def process_chunk(args):
             out["lines"].append((-f.GetField(0), parts))
 
     # Soundings: shoalest cell in a hierarchy of grids; each spot keeps the first zoom it appears at.
-    depth = np.where(valid, -a, np.inf)
+    # Skip spots ashore (OSM land) and implausible drying heights (NONNA carries some land values).
+    ashore = land_mask(gt, a.shape)
+    depth = np.where(valid & ~ashore & (a < 5), -a, np.inf)
     H, W = a.shape
     chosen = {}
     for size, z in SOUND_CELLS:
@@ -219,9 +261,9 @@ def process_chunk(args):
         if hh == 0 or ww == 0:
             continue
         blk = depth[:hh, :ww].reshape(hh // c, c, ww // c, c).transpose(0, 2, 1, 3).reshape(hh // c, ww // c, c * c)
-        frac = np.isfinite(blk).mean(axis=2)
+        frac = (blk < 1e9).mean(axis=2)
         k = blk.argmin(axis=2)
-        for by, bx in zip(*np.nonzero(frac >= 0.7)):
+        for by, bx in zip(*np.nonzero(frac >= 0.6)):
             iy, ix = divmod(int(k[by, bx]), c)
             key = (by * c + iy, bx * c + ix)
             if size < 200 and depth[key] > 40:      # open deep water needs fewer numbers
@@ -431,6 +473,7 @@ def main():
         w.buf += zlib.decompress(d[8 + hl:], -15)
         w.count = {int(k): v for k, v in h["counts"].items()}
     else:
+        load_land_layer(box, a.land_zip or os.path.join(a.work, "land.zip"))
         # Base water tint for the whole region; depth tints and land paint over it.
         corners = [m2w(mx0, my1), m2w(mx1, my1), m2w(mx1, my0), m2w(mx0, my0)]
         w.recw(K_COVER, 0, 0, None, None, "", [corners + [corners[0]]])
