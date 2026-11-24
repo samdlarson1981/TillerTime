@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install numpy scipy
+        run: pip install numpy scipy eccodes
       - name: Cache model grid
         uses: actions/cache@v4
         with:
@@ -37,6 +37,8 @@ jobs:
         run: python tools/currents/build_current_pack.py -o salishsea.ttcur
       - name: Build wind and rain packs
         run: python tools/wind/build_wind_pack.py -o salishsea.ttwind --rain-output salishsea.ttrain
+      - name: Build cloud and 10-day outlook packs
+        run: python tools/clouds/build_cloud_pack.py --clouds salishsea.ttcloud --outlook salishsea.ttoutlook
       - name: Build tide pack
         run: python tools/tides/build_tide_pack.py -o salishsea.tides.json
       - name: Publish
@@ -45,5 +47,5 @@ jobs:
         run: |
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" \
-              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
-          gh release upload currents-latest salishsea.ttcur salishsea.ttwind salishsea.ttrain salishsea.tides.json --clobber
+              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS). Clouds and 10-day outlook: NOAA HRRR and GFS (public domain). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
+          gh release upload currents-latest salishsea.ttcur salishsea.ttwind salishsea.ttrain salishsea.tides.json salishsea.ttcloud salishsea.ttoutlook --clobber

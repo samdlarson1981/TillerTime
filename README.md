@@ -9,6 +9,8 @@ Four times a day a GitHub Actions job builds small forecast files and publishes 
 | Currents | [salishsea.ttcur](https://github.com/samdlarson1981/TillerTime/releases/download/currents-latest/salishsea.ttcur) | SalishSeaCast (UBC) | ~450 m, hourly, ~35–40 h ahead, ~5 MB |
 | Wind and gusts | [salishsea.ttwind](https://github.com/samdlarson1981/TillerTime/releases/download/currents-latest/salishsea.ttwind) | ECCC HRDPS via MSC GeoMet | 2.5 km, hourly, ~45 h ahead, ~3 MB |
 | Rain | [salishsea.ttrain](https://github.com/samdlarson1981/TillerTime/releases/download/currents-latest/salishsea.ttrain) | ECCC HRDPS precipitation rate | 2.5 km, hourly, ~45 h ahead |
+| Clouds (low / mid / high) | [salishsea.ttcloud](https://github.com/samdlarson1981/TillerTime/releases/download/currents-latest/salishsea.ttcloud) | NOAA HRRR | 3 km, hourly, ~48 h |
+| 10-day outlook | [salishsea.ttoutlook](https://github.com/samdlarson1981/TillerTime/releases/download/currents-latest/salishsea.ttoutlook) | NOAA GFS | 0.25°, 3-hourly, 10 days: clouds, wind, gusts, rain |
 | Tides | [salishsea.tides.json](https://github.com/samdlarson1981/TillerTime/releases/download/currents-latest/salishsea.tides.json) | NOAA CO-OPS + Canadian Hydrographic Service | ~305 stations, highs and lows for 8 days |
 
 Tiller Time downloads them automatically while it's open. You can also tap **More › Forecasts › Update now**.
