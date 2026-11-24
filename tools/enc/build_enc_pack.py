@@ -8,8 +8,9 @@ soundings, hazards, buoys, beacons, lights and place names.
 Layout: b"HENC" + u32 header length + JSON header + raw DEFLATE body.
 Body: a run of records (little endian):
   u8 kind, u8 band, u8 minZoom, u8 coveredBy, u32 attr, f32 v1, f32 v2,
-  u8 labelLen, label (utf-8), varint parts, then per part: varint n, n x (zigzag-varint lon, lat)
-  in 1e-6 deg, deltas from the previous point (the first from 0); kind 10 (soundings) adds
+  u8 labelLen, label (utf-8), varint parts, then per part: varint n, n x (zigzag-varint x, y)
+  in Web-Mercator world units (2^30 across the world, y down from the north edge), deltas from
+  the previous point (the first from 0), so the app can draw without projecting; kind 10 (soundings) adds
   n x zigzag-varint depth in decimetres after its one part.
 Not for navigation.
 """
@@ -139,6 +140,14 @@ def parts_of(geom, band=None):
     return [[(p[0], p[1]) for p in pts] for pts in out if pts]
 
 
+WORLD = 1 << 30
+
+
+def merc(lon, lat):
+    s = math.sin(math.radians(max(-85.0, min(85.0, lat))))
+    return round((lon + 180) / 360 * WORLD), round((0.5 - math.log((1 + s) / (1 - s)) / (4 * math.pi)) * WORLD)
+
+
 class Writer:
     def __init__(self):
         self.buf = bytearray()
@@ -163,7 +172,7 @@ class Writer:
             self.var(len(pts))
             px = py = 0
             for x, y in pts:
-                ix, iy = round(x * 1e6), round(y * 1e6)
+                ix, iy = merc(x, y)
                 self.zz(ix - px); self.zz(iy - py)
                 px, py = ix, iy
         if depths is not None:
@@ -379,7 +388,7 @@ def main():
         process(paths[n], band, w, near)
     body = zlib.compress(bytes(w.buf), 9)[2:-4]
     import datetime
-    header = json.dumps({"magic": "HENC", "version": 1, "source": "NOAA ENC (public domain)",
+    header = json.dumps({"magic": "HENC", "version": 2, "units": "merc30", "source": "NOAA ENC (public domain)",
                          "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
                          "bbox": box, "cells": len(names), "records": sum(w.count.values()),
                          "counts": {str(k): v for k, v in sorted(w.count.items())},
