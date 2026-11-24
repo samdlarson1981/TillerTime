@@ -10,7 +10,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main]
-    paths: ["tools/enc/build_bc_pack.py", ".github/workflows/charts-bc.yml"]
+    paths: ["tools/enc/build_bc_pack.py", "data/bc_depths.henc", ".github/workflows/charts-bc.yml"]
 
 permissions:
   contents: write
@@ -24,7 +24,14 @@ jobs:
       - name: Install GDAL
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gdal-bin python3-gdal python3-numpy
       - name: Build BC chart pack
-        run: /usr/bin/python3 tools/enc/build_bc_pack.py --work bc_work --threads 4 --output charts_bc.ttenc 2>&1 | grep -v "Warning 1"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          # Stage 1 (NONNA depths) is built off GitHub because CHS refuses cloud runners;
+          # see tools/enc/build_bc_pack.py. Stage 2 adds OpenStreetMap land, seamarks and names.
+          /usr/bin/python3 tools/enc/build_bc_pack.py --work bc_work --depths-from data/bc_depths.henc \
+            --output charts_bc.ttenc 2>&1 | grep -v "Warning 1"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

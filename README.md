@@ -28,3 +28,12 @@ public domain) for the US Salish Sea into one compact pack, `charts_salish.ttenc
 app draws on the phone: depth areas, contours, soundings, land, docks, rocks, wrecks,
 buoys, beacons, lights and place names. `.github/workflows/charts.yml` rebuilds it every
 Monday. Canadian waters use the CHS chart service in the app. Not for navigation.
+
+### BC vector charts
+
+`tools/enc/build_bc_pack.py` makes a free chart for BC waters (Victoria to Desolation Sound's
+southern approaches) from CHS NONNA-10 survey depths (Open Government Licence – Canada) and
+OpenStreetMap land, buoys, lights, docks and names (© OpenStreetMap contributors, ODbL).
+CHS's data service refuses GitHub's cloud runners, so the depth stage runs elsewhere and is
+committed as `data/bc_depths.henc`; `.github/workflows/charts-bc.yml` adds the OpenStreetMap
+layers monthly and publishes `charts_bc.ttenc`. Not for navigation.

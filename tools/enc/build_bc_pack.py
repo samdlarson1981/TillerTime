@@ -9,6 +9,12 @@ Sources (all free):
 
 Writes the same record layout as build_enc_pack.py so the app draws both with one renderer.
 The app clips this pack to the Canadian side of the border.
+
+CHS's WCS refuses requests from GitHub's cloud runners, so the build has two stages:
+  1. --depths-only (run on any ordinary machine): NONNA depths -> data/bc_depths.henc, committed
+     to the repo; the survey data changes slowly, so rebuild it a few times a year.
+  2. --depths-from bc_depths.henc (GitHub Actions, monthly): adds land, buoys, lights and names
+     from OpenStreetMap and writes charts_bc.ttenc.
 """
 import argparse, concurrent.futures as cf, datetime, json, math, os, re, struct, sys, tempfile, time, urllib.parse, \
     urllib.request, zipfile, zlib
@@ -399,6 +405,8 @@ def main():
     ap.add_argument("--output", default="charts_bc.ttenc")
     ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--no-osm", action="store_true")
+    ap.add_argument("--depths-only", action="store_true", help="stage 1: write only the NONNA depth records")
+    ap.add_argument("--depths-from", default=None, help="stage 2: start from a stage-1 file instead of NONNA")
     a = ap.parse_args()
     box = tuple(map(float, a.bbox.split(",")))
     os.makedirs(a.work, exist_ok=True)
@@ -416,47 +424,62 @@ def main():
     print("chunks:", len(jobs), file=sys.stderr)
 
     w = MWriter()
-    # Base water tint for the whole region; depth tints and land paint over it.
-    corners = [m2w(mx0, my1), m2w(mx1, my1), m2w(mx1, my0), m2w(mx0, my0)]
-    w.recw(K_COVER, 0, 0, None, None, "", [corners + [corners[0]]])
-    w.recw(K_DEPARE, 0, 0, None, None, "", [corners + [corners[0]]])
+    if a.depths_from:
+        d = open(a.depths_from, "rb").read()
+        hl = struct.unpack("<I", d[4:8])[0]
+        h = json.loads(d[8:8 + hl])
+        w.buf += zlib.decompress(d[8 + hl:], -15)
+        w.count = {int(k): v for k, v in h["counts"].items()}
+    else:
+        # Base water tint for the whole region; depth tints and land paint over it.
+        corners = [m2w(mx0, my1), m2w(mx1, my1), m2w(mx1, my0), m2w(mx0, my0)]
+        w.recw(K_COVER, 0, 0, None, None, "", [corners + [corners[0]]])
+        w.recw(K_DEPARE, 0, 0, None, None, "", [corners + [corners[0]]])
 
-    sounds = []
-    done = 0
-    # The app paints all depth tints, then land, then lines, so record order does not matter.
-    with cf.ThreadPoolExecutor(a.threads) as ex:
-        for r in ex.map(process_chunk, jobs):
-            done += 1
-            if done % 20 == 0:
-                print("  %d/%d" % (done, len(jobs)), file=sys.stderr)
-            if not r:
-                continue
-            for d1, parts in r["areas"]:
-                w.recw(K_DEPARE, 0, 0, d1, None, "", parts)
-            for d, parts in r["lines"]:
-                w.recw(K_DEPCNT, 10 if d >= 10 else 11, 0, d, None, "", parts)
-            sounds += r["sound"]
+        sounds = []
+        done = 0
+        # The app paints all depth tints, then land, then lines, so record order does not matter.
+        with cf.ThreadPoolExecutor(a.threads) as ex:
+            for r in ex.map(process_chunk, jobs):
+                done += 1
+                if done % 20 == 0:
+                    print("  %d/%d" % (done, len(jobs)), file=sys.stderr)
+                if not r:
+                    continue
+                for d1, parts in r["areas"]:
+                    w.recw(K_DEPARE, 0, 0, d1, None, "", parts)
+                for d, parts in r["lines"]:
+                    w.recw(K_DEPCNT, 10 if d >= 10 else 11, 0, d, None, "", parts)
+                sounds += r["sound"]
+        by_zoom = {}
+        for z, p, d in sounds:
+            by_zoom.setdefault(z, ([], []))
+            by_zoom[z][0].append(p); by_zoom[z][1].append(d)
+        for z, (pts, ds) in sorted(by_zoom.items()):
+            w.recw(K_SOUND, z, 0, None, None, "", [pts], ds)
+
+    if a.depths_only:
+        write(w, box, a.output, "CHS NONNA-10 (OGL-Canada)")
+        return
     print("land", file=sys.stderr)
     for parts in land_polygons(box, a.work, a.land_zip):
         w.recw(K_LAND, 0, 0, None, None, "", parts)
-    by_zoom = {}
-    for z, p, d in sounds:
-        by_zoom.setdefault(z, ([], []))
-        by_zoom[z][0].append(p); by_zoom[z][1].append(d)
-    for z, (pts, ds) in sorted(by_zoom.items()):
-        w.recw(K_SOUND, z, 0, None, None, "", [pts], ds)
     if not a.no_osm:
         seamarks(w, box)
         names(w, box)
+    write(w, box, a.output, "CHS NONNA-10 (OGL-Canada); OpenStreetMap (ODbL)")
+
+
+def write(w, box, output, source):
     body = zlib.compress(bytes(w.buf), 9)[2:-4]
     header = json.dumps({"magic": "HENC", "version": 2, "units": "merc30", "side": "ca",
-                         "source": "CHS NONNA-10 (OGL-Canada); OpenStreetMap (ODbL)",
+                         "source": source,
                          "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
                          "bbox": box, "records": sum(w.count.values()),
                          "counts": {str(k): v for k, v in sorted(w.count.items())}, "rawBytes": len(w.buf)}).encode()
-    with open(a.output, "wb") as f:
+    with open(output, "wb") as f:
         f.write(b"HENC" + struct.pack("<I", len(header)) + header + body)
-    print("records", w.count, "raw %.1f MB, packed %.1f MB" % (len(w.buf) / 1e6, os.path.getsize(a.output) / 1e6),
+    print("records", w.count, "raw %.1f MB, packed %.1f MB" % (len(w.buf) / 1e6, os.path.getsize(output) / 1e6),
           file=sys.stderr)
 
 
