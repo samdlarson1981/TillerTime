@@ -35,7 +35,21 @@ WCS = ("https://nonna-geoserver.data.chs-shc.ca/geoserver/wcs?service=WCS&versio
        "&coverage=nonna:NONNA%2010%20Coverage&crs=EPSG:3857&response_crs=EPSG:3857"
        "&bbox={},{},{},{}&width={}&height={}&format=GeoTIFF")
 LAND_URL = "https://osmdata.openstreetmap.de/download/land-polygons-split-4326.zip"
-OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
+OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass.private.coffee/api/interpreter"]
+
+# GitHub runners have no IPv6 route; prefer IPv4 so Overpass doesn't fail with "network unreachable".
+import socket
+_gai = socket.getaddrinfo
+
+
+def _gai_v4(host, *args, **kw):
+    res = _gai(host, *args, **kw)
+    v4 = [r for r in res if r[0] == socket.AF_INET]
+    return v4 or res
+
+
+socket.getaddrinfo = _gai_v4
 
 PX = 10.0                 # metres (Web Mercator) per grid cell
 CHUNK = 2048              # cells per chunk side (20 km)
@@ -324,7 +338,7 @@ COL_ABBR = {"white": "W", "red": "R", "green": "G", "yellow": "Y", "blue": "Bu",
 
 def overpass(query):
     last = None
-    for url in OVERPASS:
+    for url in OVERPASS * 2:
         try:
             data = urllib.parse.urlencode({"data": query}).encode()
             req = urllib.request.Request(url, data=data, headers={"User-Agent": "TillerTime chart builder"})
@@ -333,6 +347,7 @@ def overpass(query):
         except Exception as e:
             last = e
             print("overpass failed at", url, e, file=sys.stderr)
+            time.sleep(20)
     raise last
 
 
