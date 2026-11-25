@@ -1,7 +1,8 @@
 # Rebuilds the forecast packs four times a day and publishes them as GitHub release
 # assets with fixed addresses the app downloads:
 #   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttcur   (currents, UBC SalishSeaCast)
-#   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttwind  (wind, ECCC HRDPS)
+#   .../currents-latest/regions.json plus <region>.ttwind/.ttrain/.ttcloud/.ttoutlook for each
+#   west-coast region from San Diego to Kodiak (tools/regions/build_regions.py)
 # Paste that address into Tiller Time › More › Currents › Pack address.
 # Free on GitHub Actions; the repository must be public for the app to download without a login.
 name: Build forecast packs
@@ -20,7 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,10 +36,8 @@ jobs:
           key: ssc-grid-v21-08
       - name: Build current pack
         run: python tools/currents/build_current_pack.py -o salishsea.ttcur
-      - name: Build wind and rain packs
-        run: python tools/wind/build_wind_pack.py -o salishsea.ttwind --rain-output salishsea.ttrain
-      - name: Build cloud and 10-day outlook packs
-        run: python tools/clouds/build_cloud_pack.py --clouds salishsea.ttcloud --outlook salishsea.ttoutlook
+      - name: Build wind, rain, cloud and outlook packs for every west-coast region
+        run: python tools/regions/build_regions.py --out packs
       - name: Build tide pack
         run: python tools/tides/build_tide_pack.py -o salishsea.tides.json
       - name: Publish
@@ -47,5 +46,5 @@ jobs:
         run: |
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" \
-              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS). Clouds and 10-day outlook: NOAA HRRR and GFS (public domain). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
-          gh release upload currents-latest salishsea.ttcur salishsea.ttwind salishsea.ttrain salishsea.tides.json salishsea.ttcloud salishsea.ttoutlook --clobber
+              --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS), and NOAA HRRR (public domain) in California and the Gulf of Alaska. Clouds and 10-day outlook: NOAA HRRR and GFS (public domain). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
+          gh release upload currents-latest salishsea.ttcur salishsea.tides.json packs/* --clobber
