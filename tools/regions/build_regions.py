@@ -211,7 +211,48 @@ def gfs_outlook(days=10, step=3):
     return run, lat, lon, times, {k: np.array(v) for k, v in frames.items()}
 
 
-def write_outlook(path, region, gfs):
+def geps_pop(gfs, work):
+    """Chance of rain (%) on the GFS outlook grid and times: ECCC's global ensemble (GEPS,
+    21 members), probability of at least 1 mm in the 6 hours around each time. Whole coast."""
+    run, lat, lon, times, fr = gfs
+    layer = "GEPS.DIAG.6_PRMM.ERGE1"
+    xml = get(f"{GEOMET}?service=WMS&version=1.3.0&request=GetCapabilities&layer={layer}").decode()
+    m = re.search(r'<Dimension name="time"[^>]*>([^<]+)</Dimension>', xml)
+    ends = [dt.datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+            for t in m.group(1).split(",")] if m and "," in m.group(1) else []
+    if not ends:
+        print("  GEPS: no time list, chance of rain skipped", file=sys.stderr)
+        return None
+    region = ("coast", "", COAST["south"], COAST["north"], COAST["west"], COAST["east"], "")
+    out = np.zeros((len(times), len(lat), len(lon)), np.float32)
+    cache = {}
+    for k, t in enumerate(times):
+        tt = dt.datetime.fromtimestamp(t, dt.timezone.utc) + dt.timedelta(hours=3)   # window centred on t
+        e = next((x for x in ends if x >= tt), None)
+        if e is None:
+            out[k] = np.nan
+            continue
+        if e not in cache:
+            try:
+                glat, glon, a = hrdps_field(layer, region, e, work)
+                cache[e] = (glat, glon, np.nan_to_num(a, nan=0))
+            except Exception as ex:
+                print(f"  GEPS {e:%d %H}Z: {ex}", file=sys.stderr)
+                cache[e] = None
+        if cache[e] is None:
+            out[k] = np.nan
+            continue
+        glat, glon, a = cache[e]
+        ii = np.clip(np.searchsorted(glat, lat), 1, len(glat) - 1)
+        jj = np.clip(np.searchsorted(glon, lon), 1, len(glon) - 1)
+        ii = np.where(np.abs(glat[ii - 1] - lat) < np.abs(glat[ii] - lat), ii - 1, ii)
+        jj = np.where(np.abs(glon[jj - 1] - lon) < np.abs(glon[jj] - lon), jj - 1, jj)
+        out[k] = a[np.ix_(ii, jj)]
+        time.sleep(0.1)
+    return np.clip(out, 0, 100)
+
+
+def write_outlook(path, region, gfs, pop=None):
     run, lat, lon, times, fr = gfs
     _, _, s, n, w, e, _ = region
     i0, i1 = np.searchsorted(lat, s - 0.25), np.searchsorted(lat, n + 0.25)
@@ -221,13 +262,17 @@ def write_outlook(path, region, gfs):
         for i, k in enumerate(("low", "mid", "high", "u", "v", "gust", "rain")):
             a = fr[k][t, i0:i1, j0:j1]
             raw += np.clip(np.round(a * (1 if i < 3 else 100)), -32767, 32767).astype("<i2").tobytes()
+        if pop is not None:      # 8th field: chance of rain %, -1 where unknown
+            raw += np.nan_to_num(np.round(pop[t, i0:i1, j0:j1]), nan=-1).astype("<i2").tobytes()
     header = dict(format="ttoutlook", version=1, source=f"NOAA GFS 0.25° run {run:%Y-%m-%dT%HZ}",
                   license="US public domain (NOAA/NCEP)",
                   generated=dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                   lat0=float(lat[i0]), lon0=float(lon[j0]), dlat=float(lat[1] - lat[0]), dlon=float(lon[1] - lon[0]),
                   nlat=int(i1 - i0), nlon=int(j1 - j0), times=times,
-                  fields=["low", "mid", "high", "u", "v", "gust", "rain"],
-                  scales=[1, 1, 1, 0.01, 0.01, 0.01, 0.01], units=["%", "%", "%", "m/s", "m/s", "m/s", "mm/h"])
+                  fields=["low", "mid", "high", "u", "v", "gust", "rain"] + (["pop"] if pop is not None else []),
+                  scales=[1, 1, 1, 0.01, 0.01, 0.01, 0.01, 1][:8 if pop is not None else 7],
+                  units=["%", "%", "%", "m/s", "m/s", "m/s", "mm/h", "%"][:8 if pop is not None else 7],
+                  popSource="ECCC GEPS ensemble: chance of >= 1 mm in 6 h (Open Government Licence - Canada)")
     write_pack(path, b"HOUT", header, raw)
 
 
@@ -371,8 +416,14 @@ def main():
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
 
     gfs = gfs_outlook()
+    with tempfile.TemporaryDirectory() as work:
+        try:
+            pop = geps_pop(gfs, work)
+        except Exception as e:
+            print("  chance of rain skipped:", e, file=sys.stderr)
+            pop = None
     for r in regions:
-        write_outlook(os.path.join(a.out, f"{r[0]}.ttoutlook"), r, gfs)
+        write_outlook(os.path.join(a.out, f"{r[0]}.ttoutlook"), r, gfs, pop)
     print("outlooks written")
 
     # Cloud grids (all regions) and wind grids (HRRR regions) on regular lat/lon.
