@@ -31,9 +31,15 @@ Monday. Canadian waters use the CHS chart service in the app. Not for navigation
 
 ### BC vector charts
 
-`tools/enc/build_bc_pack.py` makes a free chart for BC waters (Victoria to Desolation Sound's
-southern approaches) from CHS NONNA-10 survey depths (Open Government Licence – Canada) and
+`tools/enc/build_bc_pack.py` makes a free chart for BC waters (Victoria to Prince Rupert, all of
+Vancouver Island; 10 m grid in the Salish Sea, 20 m elsewhere) from CHS NONNA-10 survey depths (Open Government Licence – Canada) and
 OpenStreetMap land, buoys, lights, docks and names (© OpenStreetMap contributors, ODbL).
 CHS's data service refuses GitHub's cloud runners, so the depth stage runs elsewhere and is
-committed as `data/bc_depths.henc`; `.github/workflows/charts-bc.yml` adds the OpenStreetMap
+committed as `data/bc_depths.henc` (Salish Sea) and `data/bc_depths_coast.henc` (rest of the coast); `.github/workflows/charts-bc.yml` adds the OpenStreetMap
 layers monthly and publishes `charts_bc.ttenc`. Not for navigation.
+
+### Overview chart
+
+`tools/enc/build_overview_pack.py` covers the whole coast from Oregon to Haida Gwaii in the same
+style, from NOAA ETOPO 2022 depths and OpenStreetMap land. The app draws it under the detailed
+charts at every zoom, so zoomed-out views look the same as close-up ones.

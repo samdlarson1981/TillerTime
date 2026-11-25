@@ -57,6 +57,9 @@ AREA_LEVELS = [-20, -10, -5, -2, 0]                  # elevation (m, negative = 
 LINE_LEVELS = [-200, -100, -50, -30, -20, -10, -5, -2]
 SOUND_CELLS = [(1600, 10), (800, 11), (400, 12), (200, 13), (100, 14), (70, 15)]   # cell size (m), first zoom
 SIMPLIFY = 2.5            # metres
+MIN_LINE = 60             # metres
+MIN_SOUND_CELL = 0        # metres: finest sounding grid used
+DEEP_CELL = 200           # metres: deep water (> 40 m) gets soundings only on grids this coarse
 
 
 def m2w(x, y):
@@ -185,6 +188,22 @@ def load_land_layer(box, zip_path):
     LAND_LOCK = threading.Lock()
 
 
+def all_land(x0, y0, x1, y1):
+    """True when the chunk lies entirely ashore, so there is nothing to download."""
+    if LAND_LAYER is None:
+        return False
+    rect = ogr.CreateGeometryFromWkt("POLYGON(({a} {b},{c} {b},{c} {d},{a} {d},{a} {b}))".format(a=x0, b=y0, c=x1, d=y1))
+    with LAND_LOCK:
+        lyr = LAND_LAYER[1]
+        lyr.SetSpatialFilter(rect)
+        u = None
+        for f in lyr:
+            g = f.GetGeometryRef().Intersection(rect)
+            u = g if u is None else u.Union(g)
+        lyr.SetSpatialFilter(None)
+    return u is not None and u.GetArea() >= rect.GetArea() * 0.999
+
+
 def land_mask(gt, shape):
     if LAND_LAYER is None:
         return np.zeros(shape, bool)
@@ -203,7 +222,9 @@ def process_chunk(args):
     x0, y1, work = args              # top-left corner in metres
     n = CHUNK + 1                    # one cell of overlap with the next chunk
     x1, y0 = x0 + n * PX, y1 - n * PX
-    path = os.path.join(work, "n_%d_%d.tif" % (int(x0), int(y1)))
+    if all_land(x0, y0, x1, y1):
+        return None
+    path = os.path.join(work, "n%d_%d_%d.tif" % (int(PX), int(x0), int(y1)))
     if not os.path.exists(path):
         get(WCS.format(x0, y0, x1, y1, n, n), path)
     ds = gdal.Open(path)
@@ -256,7 +277,7 @@ def process_chunk(args):
         g = f.GetGeometryRef()
         if g is None:
             continue
-        if g.Length() < 60:
+        if g.Length() < MIN_LINE:
             continue
         g = simplify(g, False)
         parts = geom_parts_m(g)
@@ -270,6 +291,8 @@ def process_chunk(args):
     H, W = a.shape
     chosen = {}
     for size, z in SOUND_CELLS:
+        if size < MIN_SOUND_CELL:
+            continue
         c = int(size / PX)
         hh, ww = (H // c) * c, (W // c) * c
         if hh == 0 or ww == 0:
@@ -280,7 +303,7 @@ def process_chunk(args):
         for by, bx in zip(*np.nonzero(frac >= 0.6)):
             iy, ix = divmod(int(k[by, bx]), c)
             key = (by * c + iy, bx * c + ix)
-            if size < 200 and depth[key] > 40:      # open deep water needs fewer numbers
+            if size < DEEP_CELL and depth[key] > 40:      # open deep water needs fewer numbers
                 continue
             if key not in chosen:
                 chosen[key] = (z, float(depth[key]))
@@ -456,37 +479,59 @@ def names(w, box):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bbox", default="-125.0,48.2,-122.75,50.0", help="west,south,east,north")
+    ap.add_argument("--bbox", default="-131.3,48.2,-122.75,54.7", help="west,south,east,north (Victoria to Prince Rupert)")
     ap.add_argument("--work", default="bc_work")
     ap.add_argument("--land-zip", default=None)
     ap.add_argument("--output", default="charts_bc.ttenc")
     ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--no-osm", action="store_true")
     ap.add_argument("--depths-only", action="store_true", help="stage 1: write only the NONNA depth records")
-    ap.add_argument("--depths-from", default=None, help="stage 2: start from a stage-1 file instead of NONNA")
+    ap.add_argument("--depths-from", default=None, nargs="*", help="stage 2: start from stage-1 file(s) instead of NONNA")
+    ap.add_argument("--cell", type=float, default=10.0, help="stage 1 grid cell in metres (10 = full NONNA-10)")
+    ap.add_argument("--exclude", default=None, help="stage 1: skip chunks wholly inside this west,south,east,north box")
+    ap.add_argument("--simplify", type=float, default=2.5, help="stage 1: line simplification in metres")
+    ap.add_argument("--lines", default=None, help="stage 1: contour depths in metres, e.g. 2,5,10,20,50,100")
+    ap.add_argument("--min-line", type=float, default=60, help="stage 1: drop contour pieces shorter than this (m)")
+    ap.add_argument("--min-sounding-cell", type=float, default=0, help="stage 1: finest sounding grid (m)")
+    ap.add_argument("--deep-cell", type=float, default=200, help="stage 1: deep water soundings only on grids this coarse (m)")
     a = ap.parse_args()
     box = tuple(map(float, a.bbox.split(",")))
     os.makedirs(a.work, exist_ok=True)
+    global PX, SIMPLIFY, LINE_LEVELS, MIN_LINE, MIN_SOUND_CELL, DEEP_CELL
+    PX = a.cell
+    MIN_SOUND_CELL = a.min_sounding_cell
+    DEEP_CELL = a.deep_cell
+    SIMPLIFY = a.simplify
+    MIN_LINE = a.min_line
+    if a.lines:
+        LINE_LEVELS = sorted(-float(v) for v in a.lines.split(","))
     mx0, my0 = lonlat_to_m(box[0], box[1])
     mx1, my1 = lonlat_to_m(box[2], box[3])
     step = CHUNK * PX
+    ex_box = None
+    if a.exclude:
+        e = tuple(map(float, a.exclude.split(",")))
+        ex_box = lonlat_to_m(e[0], e[1]) + lonlat_to_m(e[2], e[3])
     jobs = []
     y = my1
     while y > my0:
         x = mx0
         while x < mx1:
-            jobs.append((x, y, a.work))
+            if ex_box is None or not (x >= ex_box[0] and x + step <= ex_box[2] and y <= ex_box[3] and y - step >= ex_box[1]):
+                jobs.append((x, y, a.work))
             x += step
         y -= step
     print("chunks:", len(jobs), file=sys.stderr)
 
     w = MWriter()
     if a.depths_from:
-        d = open(a.depths_from, "rb").read()
-        hl = struct.unpack("<I", d[4:8])[0]
-        h = json.loads(d[8:8 + hl])
-        w.buf += zlib.decompress(d[8 + hl:], -15)
-        w.count = {int(k): v for k, v in h["counts"].items()}
+        for path in a.depths_from:
+            d = open(path, "rb").read()
+            hl = struct.unpack("<I", d[4:8])[0]
+            h = json.loads(d[8:8 + hl])
+            w.buf += zlib.decompress(d[8 + hl:], -15)
+            for k, v in h["counts"].items():
+                w.count[int(k)] = w.count.get(int(k), 0) + v
     else:
         load_land_layer(box, a.land_zip or os.path.join(a.work, "land.zip"))
         # Base water tint for the whole region; depth tints and land paint over it.

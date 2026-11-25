@@ -20,7 +20,7 @@ import time
 import urllib.parse
 import urllib.request
 
-BOX = dict(south=46.8, north=51.2, west=-126.5, east=-121.2)
+BOX = dict(south=46.8, north=54.8, west=-133.5, east=-121.2)   # Puget Sound to Prince Rupert, all of Vancouver Island
 UA = "TillerTimeTidePack/0.1 (+chartplotter)"
 DAYS = 8
 

@@ -1,5 +1,7 @@
-# Builds Tiller Time's free BC vector chart pack from open data and publishes it with the
-# other packs: .../releases/download/currents-latest/charts_bc.ttenc
+# Builds Tiller Time's free BC vector chart pack (Victoria to Prince Rupert) and the overview
+# pack (whole coast, every zoom) from open data and publishes them with the other packs:
+#   .../releases/download/currents-latest/charts_bc.ttenc and charts_overview.ttenc
+#   Overview: NOAA ETOPO 2022 (public domain) + OpenStreetMap land.
 #   Depths: CHS NONNA-10 (Open Government Licence - Canada). Land, buoys, lights, docks and
 #   names: OpenStreetMap (ODbL). Not for navigation.
 name: Build BC vector charts
@@ -10,7 +12,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main]
-    paths: ["tools/enc/build_bc_pack.py", "data/bc_depths.henc", ".github/workflows/charts-bc.yml"]
+    paths: ["tools/enc/build_bc_pack.py", "tools/enc/build_overview_pack.py", "data/**", ".github/workflows/charts-bc.yml"]
 
 permissions:
   contents: write
@@ -30,12 +32,18 @@ jobs:
           set -o pipefail
           # Stage 1 (NONNA depths) is built off GitHub because CHS refuses cloud runners;
           # see tools/enc/build_bc_pack.py. Stage 2 adds OpenStreetMap land, seamarks and names.
-          /usr/bin/python3 tools/enc/build_bc_pack.py --work bc_work --depths-from data/bc_depths.henc \
+          /usr/bin/python3 tools/enc/build_bc_pack.py --work bc_work \
+            --depths-from data/bc_depths.henc data/bc_depths_coast.henc \
             --output charts_bc.ttenc 2>&1 | grep -v "Warning 1"
+      - name: Build overview chart pack
+        run: |
+          set -o pipefail
+          /usr/bin/python3 tools/enc/build_overview_pack.py --work bc_work --land-zip bc_work/land.zip \
+            --output charts_overview.ttenc 2>&1 | grep -v "Warning 1"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" --notes "Packs for Tiller Time."
-          gh release upload currents-latest charts_bc.ttenc --clobber
+          gh release upload currents-latest charts_bc.ttenc charts_overview.ttenc --clobber
