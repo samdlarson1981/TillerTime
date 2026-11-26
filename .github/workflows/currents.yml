@@ -1,6 +1,7 @@
 # Rebuilds the forecast packs four times a day and publishes them as GitHub release
 # assets with fixed addresses the app downloads:
 #   https://github.com/<you>/<repo>/releases/download/currents-latest/salishsea.ttcur   (currents, UBC SalishSeaCast)
+#   .../currents-latest/ciops_west.ttcur (currents, ECCC CIOPS-West, BC coast and SE Alaska, 48 h)
 #   .../currents-latest/regions.json plus <region>.ttwind/.ttrain/.ttcloud/.ttoutlook for each
 #   west-coast region from San Diego to Kodiak (tools/regions/build_regions.py)
 # Paste that address into Tiller Time › More › Currents › Pack address.
@@ -28,7 +29,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install numpy scipy eccodes
+        run: pip install numpy scipy eccodes netCDF4
       - name: Cache model grid
         uses: actions/cache@v4
         with:
@@ -40,6 +41,9 @@ jobs:
         run: python tools/regions/build_regions.py --out packs
       - name: Build tide pack
         run: python tools/tides/build_tide_pack.py -o salishsea.tides.json
+      - name: Build CIOPS-West currents (BC coast and SE Alaska, 48 h)
+        run: python tools/currents/build_ciops_pack.py -o ciops_west.ttcur
+        continue-on-error: true
       - name: Build tidal current stations (10 days, NOAA + CHS)
         run: python tools/currents/build_current_stations.py -o currents_stations.json
         continue-on-error: true
@@ -50,4 +54,4 @@ jobs:
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" \
               --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS), and NOAA HRRR (public domain) in California and the Gulf of Alaska. Clouds and 10-day outlook: NOAA HRRR and GFS (public domain). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
-          gh release upload currents-latest salishsea.ttcur salishsea.tides.json packs/* $(ls currents_stations.json 2>/dev/null) --clobber
+          gh release upload currents-latest salishsea.ttcur salishsea.tides.json packs/* $(ls currents_stations.json ciops_west.ttcur 2>/dev/null) --clobber

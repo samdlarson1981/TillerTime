@@ -1,0 +1,40 @@
+# Rebuilds the tidal-current mesh (currents.ttmesh) weekly: how each patch of coastal water from
+# Puget Sound to Glacier Bay relates to nearby current stations, measured through the water on an
+# OpenStreetMap coastline. The app combines it with currents_stations.json (built 4x a day by
+# currents.yml) to draw currents for all ten days wherever stations are near.
+name: Build current mesh
+
+on:
+  schedule:
+    - cron: "41 9 * * 1"            # Mondays, UTC
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ["tools/currents/build_current_mesh.py", ".github/workflows/mesh.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gdal-bin
+          pip install numpy scipy scikit-image
+      - name: Download OpenStreetMap land and the current stations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sSfL -o land.zip https://osmdata.openstreetmap.de/download/land-polygons-split-4326.zip
+          gh release download currents-latest -p currents_stations.json --clobber || \
+            python tools/currents/build_current_stations.py -o currents_stations.json
+      - name: Build mesh
+        run: python tools/currents/build_current_mesh.py --land-zip land.zip --stations currents_stations.json -o currents.ttmesh
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload currents-latest currents.ttmesh --clobber
