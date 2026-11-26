@@ -40,6 +40,9 @@ jobs:
         run: python tools/regions/build_regions.py --out packs
       - name: Build tide pack
         run: python tools/tides/build_tide_pack.py -o salishsea.tides.json
+      - name: Build tidal current stations (10 days, NOAA + CHS)
+        run: python tools/currents/build_current_stations.py -o currents_stations.json
+        continue-on-error: true
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,4 +50,4 @@ jobs:
           gh release view currents-latest >/dev/null 2>&1 || \
             gh release create currents-latest --title "Current pack (latest)" \
               --notes "Forecast packs for Tiller Time, rebuilt automatically. Currents: SalishSeaCast, © SalishSeaCast Project Contributors and UBC, Apache-2.0. Wind and rain: contains information licensed under the Open Government Licence – Canada (ECCC HRDPS), and NOAA HRRR (public domain) in California and the Gulf of Alaska. Clouds and 10-day outlook: NOAA HRRR and GFS (public domain). Tides: NOAA CO-OPS and Canadian Hydrographic Service (Open Government Licence – Canada)."
-          gh release upload currents-latest salishsea.ttcur salishsea.tides.json packs/* --clobber
+          gh release upload currents-latest salishsea.ttcur salishsea.tides.json packs/* $(ls currents_stations.json 2>/dev/null) --clobber
